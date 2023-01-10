@@ -3,49 +3,81 @@ package ratelimit
 import (
 	"fmt"
 	"log"
-	"os"
+	"strconv"
+	"time"
 
 	"github.com/gomodule/redigo/redis"
 	"github.com/kubesure/resiliency"
+	r "github.com/kubesure/resiliency"
 )
 
 //Redis k8s service
-var redissvc = os.Getenv("redissvc")
+//var redissvc = os.Getenv("redissvc")
 
-type limit struct {
-	available   bool
-	msRemaining int
+type tokenbucket struct{}
+
+func NewTokenBucketLimiter() r.RateLimiter {
+	return &tokenbucket{}
 }
 
-//checks if endpoint has request limits available. Returns
-func checkBucket(ep string) (*limit, *resiliency.Error) {
+//checks if endpoint has request limits available.
+//Returns limit availabiliy or errors (limits threshold breach err and other erros)
+func (rl *tokenbucket) Process(limitKey string) (*r.Limit, *r.Error) {
+
+	count, err := getLimit(limitKey)
+	if err != nil {
+		return nil, err
+	}
+
+	if *count == 0 {
+		//set new minutre key return key
+	}
+	//incr expire
+
+	return &r.Limit{Available: true, MsRemaining: 1}, nil
+}
+
+func getLimit(limitKey string) (*int, *resiliency.Error) {
+	logger := resiliency.NewLogger()
 	c, err := connWrite()
 	if err != nil {
+		logger.LogInternalError(err.Error())
 		return nil, &resiliency.Error{Code: resiliency.InternalError, Message: resiliency.DBError}
 	}
 	defer c.Close()
-	//return nil, &resiliency.Error{Code: resiliency.LimitExpired, Message: resiliency.LimitExpiredError}
-	return &limit{available: true, msRemaining: 1}, nil
+
+	_, min, _ := time.Now().Clock()
+
+	key := fmt.Sprintf("%v:%v", limitKey, min)
+
+	result, rerr := redis.String(c.Do("GET", key))
+
+	if rerr != nil && rerr != redis.ErrNil {
+		logger.LogInternalError(rerr.Error())
+		return nil, &resiliency.Error{Code: resiliency.InternalError, Message: resiliency.DBError}
+	}
+
+	if rerr == redis.ErrNil {
+		logger.LogInfo(fmt.Sprintf("key : %v not found", key))
+		return countPtr(0), nil
+	}
+
+	logger.LogInfo(fmt.Sprintf("key : %v value: %v", key, result))
+	count, _ := strconv.Atoi(result)
+	return countPtr(count), nil
+
 }
 
-//gives back a connection to master for writing or loading premium matrix
+func countPtr(c int) *int {
+	return &c
+}
+
+//gives back a connection for writing
 func connWrite() (redis.Conn, error) {
-	sc, err := redis.DialURL("redis://" + redissvc + ":26379/0")
+	c, err := redis.DialURL("redis://" + "localhost" + ":6379")
 	if err != nil {
+		log.Println(err)
 		return nil, fmt.Errorf("Cannot connect to redis sentinel %v ", err)
 	}
-	defer sc.Close()
-
-	minfo, err := redis.Strings(sc.Do("sentinel", "get-master-addr-by-name", "redis-premium-master"))
-	log.Println(minfo)
-	if err != nil {
-		return nil, fmt.Errorf("Cannot find redis master %v ", err)
-	}
-
-	mc, err := redis.DialURL("redis://" + minfo[0] + ":6379/0")
-	if err != nil {
-		return nil, fmt.Errorf("Cannot connect to redis master %v ", err)
-	}
-	sc.Close()
-	return mc, nil
+	return c, nil
 }
