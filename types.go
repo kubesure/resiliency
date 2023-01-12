@@ -3,12 +3,11 @@ package resiliency
 import "github.com/sirupsen/logrus"
 
 type RateLimiter interface {
-	Process(limitKey string) (*Limit, *Error)
+	CheckLimit(limitKey string, limit, minDuration int) (*Limit, *Error)
 }
 
 type Limit struct {
-	Available   bool
-	MsRemaining int
+	Available bool
 }
 
 type Error struct {

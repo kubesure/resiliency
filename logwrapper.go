@@ -9,16 +9,16 @@ import (
 func NewLogger() *StandardLogger {
 	baseLogger := logrus.New()
 	baseLogger.SetOutput(os.Stdout)
-	baseLogger.SetLevel(logrus.InfoLevel)
+	baseLogger.SetLevel(logrus.DebugLevel)
 	var sl = &StandardLogger{baseLogger}
 	sl.Formatter = &logrus.JSONFormatter{}
 	return sl
 }
 
 var (
-	internalError = LogEvent{InternalError, "Internal Error: %v"}
+	internalError = LogEvent{InternalError, "Error: %v"}
 	LogInfo       = LogEvent{Info, "Info : %v"}
-	LogDebug      = LogEvent{Info, "Info : %v"}
+	LogDebug      = LogEvent{Debug, "Debug : %v"}
 )
 
 func (l *StandardLogger) LogInternalError(message string) {

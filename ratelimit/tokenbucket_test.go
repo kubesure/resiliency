@@ -7,12 +7,18 @@ import (
 )
 
 func TestTokenBucketOneMinLimitBreach(t *testing.T) {
-	for _, v := range []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12} {
-		limiter := NewTokenBucketLimiter()
-		limit, err := limiter.Process("MKT-SEARCH-V1")
+	limiter := NewTokenBucketLimiter()
+	droppedreq := make(map[int]int)
+
+	for d := 91; d <= 100; d++ {
+		droppedreq[d] = d
+	}
+
+	for i := 1; i <= 100; i++ {
+		_, err := limiter.CheckLimit("MKT-SEARCH-V1", 90, 1)
 		if err != nil && err.Code != resiliency.LimitExpired {
 			t.Errorf("should not have error other than limit")
-		} else if (v == 11 || v == 12) && !limit.Available {
+		} else if (i == droppedreq[i]) && (err != nil && err.Code != resiliency.LimitExpired) {
 			t.Errorf("should not be avaiable")
 		}
 	}
