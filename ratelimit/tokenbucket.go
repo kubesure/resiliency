@@ -7,33 +7,32 @@ import (
 	"time"
 
 	"github.com/gomodule/redigo/redis"
-
 	r "github.com/kubesure/resiliency"
 )
 
-//Redis k8s service
-//var redissvc = os.Getenv("redissvc")
+//Redis service
+var redisSvc, redisPort string
 
-type tokenbucket struct{}
+type tokenbucket struct {
+	limitKey                    string
+	limit, limitDurationSeconds int
+}
 
-func NewTokenBucketLimiter() r.RateLimiter {
-	return &tokenbucket{}
+func NewTokenBucketLimiter(config r.Config) r.RateLimiter {
+	redisSvc = config.RedisSvc
+	redisPort = config.RedisPort
+	return &tokenbucket{limitKey: config.LimitKey, limit: config.Limit, limitDurationSeconds: config.LimitDurationSeconds}
 }
 
 //checks if endpoint has request limits available.
 //Returns limit availabiliy or errors (limits threshold breach err and other erros)
-func (rl *tokenbucket) CheckLimit(limitKey string, limit, minDuration int) (*r.Limit, *r.Error) {
+func (rl *tokenbucket) CheckLimit() (*r.Limit, *r.Error) {
 	logger := r.NewLogger()
-	count, kerr := getLimit(limitKey)
+	mkey := minuteKey(rl.limitKey)
+
+	count, kerr := getLimit(mkey)
 	if kerr != nil {
 		return nil, kerr
-	}
-
-	if *count == limit {
-		m := make(map[string]interface{})
-		//TODO
-		m["x-seconds-remaining"] = 10
-		return nil, &r.Error{Code: r.LimitExpired, Message: r.LimitExpiredError, Misc: m}
 	}
 
 	c, cerr := connWrite()
@@ -43,11 +42,21 @@ func (rl *tokenbucket) CheckLimit(limitKey string, limit, minDuration int) (*r.L
 	}
 	defer c.Close()
 
-	key := minuteKey(limitKey)
+	if *count == rl.limit {
+		m := make(map[string]interface{})
+		secRemaining, err := redis.Int64(c.Do("TTL", mkey))
+		if err != nil {
+			logger.LogInternalError(err.Error())
+			return nil, &r.Error{Code: r.InternalError, Message: r.DBError}
+		}
+
+		m["limit-seconds-remaining"] = secRemaining
+		return &r.Limit{Available: false}, &r.Error{Code: r.LimitExpired, Message: r.LimitExpiredError, Misc: m}
+	}
 
 	c.Send("MULTI")
-	c.Send("INCR", key)
-	c.Send("EXPIRE", key, 59, "NX")
+	c.Send("INCR", mkey)
+	c.Send("EXPIRE", mkey, rl.limitDurationSeconds, "NX")
 	_, exrr := c.Do("EXEC")
 
 	if exrr != nil {
@@ -67,9 +76,7 @@ func getLimit(limitKey string) (*int, *r.Error) {
 	}
 	defer c.Close()
 
-	key := minuteKey(limitKey)
-
-	result, rerr := redis.String(c.Do("GET", key))
+	result, rerr := redis.String(c.Do("GET", limitKey))
 
 	if rerr != nil && rerr != redis.ErrNil {
 		logger.LogInternalError(rerr.Error())
@@ -77,11 +84,10 @@ func getLimit(limitKey string) (*int, *r.Error) {
 	}
 
 	if rerr == redis.ErrNil {
-		logger.LogInfo(fmt.Sprintf("key : %v not found", key))
 		return countPtr(0), nil
 	}
 
-	logger.LogInfo(fmt.Sprintf("key : %v value: %v", key, result))
+	//logger.LogInfo(fmt.Sprintf("key : %v value: %v", limitKey, result))
 	count, _ := strconv.Atoi(result)
 	return countPtr(count), nil
 
@@ -97,9 +103,10 @@ func countPtr(c int) *int {
 	return &c
 }
 
-//gives back a connection for writing
+//gives back a read write connection
 func connWrite() (redis.Conn, error) {
-	c, err := redis.DialURL("redis://" + "localhost" + ":6379")
+	redisurl := fmt.Sprintf("redis://%v:%v", redisSvc, redisPort)
+	c, err := redis.DialURL(redisurl)
 	if err != nil {
 		log.Println(err)
 		return nil, fmt.Errorf("cannot connect to redis %v ", err)

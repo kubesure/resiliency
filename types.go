@@ -3,7 +3,7 @@ package resiliency
 import "github.com/sirupsen/logrus"
 
 type RateLimiter interface {
-	CheckLimit(limitKey string, limit, minDuration int) (*Limit, *Error)
+	CheckLimit() (*Limit, *Error)
 }
 
 type Limit struct {
@@ -34,11 +34,6 @@ const (
 	LimitExpiredError ErrorMessage = "Endpoint limit expired"
 )
 
-type ErroResponse struct {
-	Code    EventCode    `json:"errorCode"`
-	Message ErrorMessage `json:"errorMessage"`
-}
-
 // StandardLogger enforces specific log message formats
 type StandardLogger struct {
 	*logrus.Logger
@@ -48,4 +43,10 @@ type StandardLogger struct {
 type LogEvent struct {
 	id      EventCode
 	message string
+}
+
+type Config struct {
+	RedisSvc, RedisPort         string
+	LimitKey                    string
+	Limit, LimitDurationSeconds int
 }
