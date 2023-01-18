@@ -30,17 +30,17 @@ func (rl *tokenbucket) CheckLimit() (*r.Limit, *r.Error) {
 	logger := r.NewLogger()
 	mkey := minuteKey(rl.limitKey)
 
-	count, kerr := getLimit(mkey)
-	if kerr != nil {
-		return nil, kerr
-	}
-
 	c, cerr := connWrite()
 	if cerr != nil {
 		logger.LogInternalError(cerr.Error())
 		return nil, &r.Error{Code: r.InternalError, Message: r.DBError}
 	}
 	defer c.Close()
+
+	count, kerr := getLimit(mkey, c)
+	if kerr != nil {
+		return nil, kerr
+	}
 
 	if *count == rl.limit {
 		m := make(map[string]interface{})
@@ -67,15 +67,8 @@ func (rl *tokenbucket) CheckLimit() (*r.Limit, *r.Error) {
 	return &r.Limit{Available: true}, nil
 }
 
-func getLimit(limitKey string) (*int, *r.Error) {
+func getLimit(limitKey string, c redis.Conn) (*int, *r.Error) {
 	logger := r.NewLogger()
-	c, err := connWrite()
-	if err != nil {
-		logger.LogInternalError(err.Error())
-		return nil, &r.Error{Code: r.InternalError, Message: r.DBError}
-	}
-	defer c.Close()
-
 	result, rerr := redis.String(c.Do("GET", limitKey))
 
 	if rerr != nil && rerr != redis.ErrNil {
@@ -87,7 +80,7 @@ func getLimit(limitKey string) (*int, *r.Error) {
 		return countPtr(0), nil
 	}
 
-	//logger.LogInfo(fmt.Sprintf("key : %v value: %v", limitKey, result))
+	logger.LogInfo(fmt.Sprintf("key : %v value: %v", limitKey, result))
 	count, _ := strconv.Atoi(result)
 	return countPtr(count), nil
 

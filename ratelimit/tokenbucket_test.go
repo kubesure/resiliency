@@ -8,6 +8,31 @@ import (
 )
 
 func TestTokenBucketOneMinLimitBreach(t *testing.T) {
+	limiter := newOneMinLimiter()
+	droppedreq := droppedRequests()
+
+	for i := 1; i <= 100; i++ {
+		limit, err := limiter.CheckLimit()
+		if err != nil && err.Code != resiliency.LimitExpired {
+			t.Errorf("should not have error other than limit")
+		} else if (i == droppedreq[i]) && (err != nil && err.Code != resiliency.LimitExpired) {
+			t.Errorf("should not be available")
+		} else if (i == droppedreq[i]) && (err != nil && err.Code == resiliency.LimitExpired) {
+			log.Printf("Limit available: %v seconds remaining: %v", limit.Available, err.Misc["limit-seconds-remaining"])
+		}
+	}
+}
+
+func droppedRequests() map[int]int {
+	droppedreq := make(map[int]int)
+
+	for d := 91; d <= 100; d++ {
+		droppedreq[d] = d
+	}
+	return droppedreq
+}
+
+func newOneMinLimiter() resiliency.RateLimiter {
 	config := resiliency.Config{
 		RedisSvc:             "localhost",
 		RedisPort:            "6379",
@@ -17,22 +42,5 @@ func TestTokenBucketOneMinLimitBreach(t *testing.T) {
 	}
 
 	limiter := NewTokenBucketLimiter(config)
-
-	droppedreq := make(map[int]int)
-
-	for d := 91; d <= 100; d++ {
-		droppedreq[d] = d
-	}
-
-	for i := 1; i <= 100; i++ {
-		limit, err := limiter.CheckLimit()
-		if err != nil && err.Code != resiliency.LimitExpired {
-			t.Errorf("should not have error other than limit")
-		} else if (i == droppedreq[i]) && (err != nil && err.Code != resiliency.LimitExpired) {
-			t.Errorf("should not be avaiable")
-		} else if (i == droppedreq[i]) && (err != nil && err.Code == resiliency.LimitExpired) {
-			log.Printf("Limit available: %v seconds remaining: %v", limit.Available, err.Misc["limit-seconds-remaining"])
-		}
-	}
-
+	return limiter
 }
