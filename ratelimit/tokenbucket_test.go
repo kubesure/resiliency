@@ -23,6 +23,14 @@ func TestTokenBucketOneMinLimitBreach(t *testing.T) {
 	}
 }
 
+func TestTokenBucketFailOpen(t *testing.T) {
+	limiter := newLimiterRedisUnavailable()
+	_, err := limiter.CheckLimit()
+	if err != nil && err.Code != resiliency.InternalError {
+		t.Errorf("Redis is not available this case should pass")
+	}
+}
+
 func droppedRequests() map[int]int {
 	droppedreq := make(map[int]int)
 
@@ -35,6 +43,19 @@ func droppedRequests() map[int]int {
 func newOneMinLimiter() resiliency.RateLimiter {
 	config := resiliency.Config{
 		RedisSvc:             "localhost",
+		RedisPort:            "6379",
+		LimitKey:             "MKT-SEARCH-V1",
+		Limit:                90,
+		LimitDurationSeconds: 59,
+	}
+
+	limiter := NewTokenBucketLimiter(config)
+	return limiter
+}
+
+func newLimiterRedisUnavailable() resiliency.RateLimiter {
+	config := resiliency.Config{
+		RedisSvc:             "localGhooooost",
 		RedisPort:            "6379",
 		LimitKey:             "MKT-SEARCH-V1",
 		Limit:                90,

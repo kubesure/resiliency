@@ -2,7 +2,6 @@ package ratelimit
 
 import (
 	"fmt"
-	"log"
 	"strconv"
 	"time"
 
@@ -57,8 +56,14 @@ func (rl *tokenbucket) CheckLimit() (*r.Limit, *r.Error) {
 	c.Send("MULTI")
 	c.Send("INCR", mkey)
 	c.Send("EXPIRE", mkey, rl.limitDurationSeconds, "NX")
-	_, exrr := c.Do("EXEC")
 
+	if c.Err() != nil {
+		logger.LogInternalError(c.Err().Error())
+		return nil, &r.Error{Code: r.InternalError, Message: r.DBError}
+	}
+
+	//handle _
+	_, exrr := c.Do("EXEC")
 	if exrr != nil {
 		logger.LogInternalError(exrr.Error())
 		return nil, &r.Error{Code: r.InternalError, Message: r.DBError}
@@ -98,10 +103,10 @@ func countPtr(c int) *int {
 
 //gives back a read write connection
 func connWrite() (redis.Conn, error) {
+	//set timeout
 	redisurl := fmt.Sprintf("redis://%v:%v", redisSvc, redisPort)
 	c, err := redis.DialURL(redisurl)
 	if err != nil {
-		log.Println(err)
 		return nil, fmt.Errorf("cannot connect to redis %v ", err)
 	}
 	return c, nil
